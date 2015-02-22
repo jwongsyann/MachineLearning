@@ -1,0 +1,97 @@
+---
+title: "Predicting the quality of barbell lifts."
+output: html_document
+---
+
+# Reading in the data
+```{r warning=FALSE}
+library(caret)
+library(ggplot2)
+library(randomForest)
+url1<-"http://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+url2<-"http://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+fulltraining<-read.csv(url1,header=TRUE,stringsAsFactor=FALSE)
+finaltest<-read.csv(url2,header=TRUE,stringsAsFactor=FALSE)
+```
+
+## Cleaning the data
+```{r warning=FALSE}
+# Dropping user name, and timestamps
+tslst<-c("X","user_name","raw_timestamp_part_1","raw_timestamp_part_2","cvtd_timestamp","new_window","num_window")
+fulltraining<-fulltraining[,!names(fulltraining) %in% tslst]
+finaltest<-finaltest[,!names(finaltest) %in% tslst]
+
+# Factoring the classe covariate
+fulltraining$classe<-as.factor(fulltraining$classe)
+
+# Changing class to numeric
+lst<-c("classe")
+namelst<-names(fulltraining)[!names(fulltraining) %in% lst]
+for (i in namelst) {
+        fulltraining[,i]<-as.numeric(fulltraining[,i])
+        finaltest[,i]<-as.numeric(finaltest[,i])
+}
+
+# Removing covariates with too many NAs
+namelist<-names(fulltraining)
+lst<-sapply(namelist,function(x){length(fulltraining[,x][is.na(fulltraining[,x])])})
+fulltraining<-fulltraining[,lst<14000]
+finaltest<-finaltest[lst<14000]
+```
+The data was first cleaned by dropping the usernames, timestamps and window variables as these were not necessary for the analysis. The analysis should be user and time independednt.
+
+The classe variable was also changed to factor format and the rest of the variables remaining were formatted as numeric. 
+
+Finally,the variables with too many NAs in the data (more than 14,000 NA) were removed from the data set as they would have little explanatory power and just add noise.
+
+The same cleaning techniques are applied to the testing set.
+
+## Preprocessing the data
+```{r warning=FALSE}
+preObj<-preProcess(fulltraining[,-53],method=c("center","scale"))
+fulltraining<-cbind(predict(preObj,fulltraining[,-53]),classe=fulltraining[,53])
+finaltest<-cbind(predict(preObj,finaltest[,-53]))
+```
+The remaining variables are further preprocessed by normalizing them (i.e, centring and scaling them). The same procedure is done for the testing set.
+
+## Data slicing training data into further training and testing cuts
+```{r warning=FALSE}
+inTrain <- createDataPartition(y=fulltraining$classe,
+                               p=0.75, list=FALSE)
+training <- fulltraining[inTrain,]
+testing <- fulltraining[-inTrain,]
+```
+For the training set, the data is further cut into a smaller training set and a testing set.
+
+## Fitting the model and testing for in-sample accuracy 
+```{r warning=FALSE}
+modFit<-randomForest(classe~.,data=training)
+pred<-predict(modFit,training)
+fitaccuracy<-confusionMatrix(pred,training$classe)
+fitaccuracy
+```
+The model is fit using random forest technique on the above training set and the fitaccuracy gives the fit of the model on the training data.
+
+## Testing the model for out-of-sample accuracy
+```{r warning=FALSE}
+pred<-predict(modFit,testing)
+OOSaccuracy<-confusionMatrix(pred,testing$classe)
+OOSaccuracy
+```
+The above model is then used to predict the testing data and the out of sample accuracy is given by the OOSaccuracy.
+
+## Using K-Fold Cross validation to verify model appropriateness
+```{r warning=FALSE}
+# K-Fold
+set.seed(32323)
+folds <- createFolds(y=fulltraining$classe,k=10,
+                     list=TRUE,returnTrain=TRUE)
+sapply(folds,function(x){
+        training<-fulltraining[x,]
+        testing<-fulltraining[-x,]
+        modFit<-randomForest(classe~.,data=training)
+        pred<-predict(modFit,testing)
+        confusionMatrix(pred,testing$classe)$overall
+})
+```
+Using K-fold validation on 10 cuts, the model is verified with robust Out of Sample accuracy. This model is thus used on the finaltesting set to predict the outcomes for the quality.
